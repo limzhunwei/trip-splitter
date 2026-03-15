@@ -211,14 +211,14 @@ export default function AddExpensePage({ editMode = false }) {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-3">
               <Field label="Date" error={errors.date}>
                 <DateInput value={date} onChange={setDate} />
               </Field>
               <Field label="Note (optional)">
                 <textarea value={note} onChange={e => setNote(e.target.value)}
-                  className="input resize-none leading-tight" placeholder="Any notes..."
-                  rows={2} style={{ minHeight: 0 }} />
+                  className="input resize-none" placeholder="Any notes..."
+                  rows={2} />
               </Field>
             </div>
           </div>

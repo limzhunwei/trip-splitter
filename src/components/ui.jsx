@@ -137,24 +137,30 @@ export function Field({ label, error, children }) {
 
 // ── DateInput ──────────────────────────────────────────────────────────────
 // Safari-safe date input with manual clear button
-// Does NOT use min attr (Safari ignores it) — validate on submit instead
 export function DateInput({ value, onChange, placeholder = 'Select date', className = '' }) {
+  // Safari doesn't fire onChange when user taps the native "clear/reset" button
+  // Using onInput as well catches it
+  function handleChange(e) {
+    onChange(e.target.value)
+  }
+
   return (
-    <div className="relative">
+    <div className="relative w-full min-w-0">
       <CalendarDays size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-10" />
       <input
         type="date"
         value={value}
-        onChange={e => onChange(e.target.value)}
-        className={`input pl-9 ${value ? 'pr-8' : ''} text-sm ${className}`}
-        placeholder={placeholder}
+        onChange={handleChange}
+        onInput={handleChange}
+        className={`input pl-9 w-full min-w-0 text-sm ${value ? 'pr-8' : ''} ${className}`}
+        style={{ maxWidth: '100%' }}
       />
-      {/* Manual clear button — needed for Safari where native clear doesn't fire onChange */}
+      {/* Manual clear — Safari native clear button doesn't reliably fire onChange */}
       {value && (
         <button
           type="button"
           onClick={() => onChange('')}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition">
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition z-10">
           <XCircle size={15} />
         </button>
       )}
@@ -179,12 +185,12 @@ export function DateRangePicker({ startDate, endDate, onStartChange, onEndChange
   }
 
   return (
-    <div className="flex flex-col sm:flex-row gap-3">
-      <div className="flex-1">
+    <div className="flex flex-col gap-3">
+      <div className="w-full">
         <label className="label">Start Date</label>
         <DateInput value={startDate} onChange={handleStartChange} />
       </div>
-      <div className="flex-1">
+      <div className="w-full">
         <label className="label">End Date</label>
         <DateInput value={endDate} onChange={handleEndChange} />
         {endDateError && <p className="text-red-500 text-xs mt-1">{endDateError}</p>}
