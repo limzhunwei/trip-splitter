@@ -35,13 +35,14 @@ export default function AuthPage() {
           options: { data: { display_name: displayName.trim(), nationality } }
         })
         if (error) throw error
+        if (data.user) {
+          // Always upsert nationality — whether session is immediate or after email confirm
+          await supabase.from('Profiles')
+            .upsert({ user_id: data.user.id, display_name: displayName.trim(), nationality }, { onConflict: 'user_id' })
+        }
         if (data.user && !data.session) {
           setInfo('Check your email for a confirmation link, then sign in.')
           setIsLogin(true)
-        } else if (data.user && data.session) {
-          // Update Profiles with nationality right after signup
-          await supabase.from('Profiles')
-            .upsert({ user_id: data.user.id, display_name: displayName.trim(), nationality }, { onConflict: 'user_id' })
         }
       }
     } catch (err) {

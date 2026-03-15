@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react'
+import React, { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { getTrips, deleteTrip, getMyPendingInvites, acceptInvite } from '../lib/db'
@@ -63,7 +63,7 @@ export default function HomePage() {
   }
 
   function togglePin(e, tripId) {
-    e.stopPropagation()
+    if (e) e.stopPropagation()
     const next = new Set(pinnedIds)
     if (next.has(tripId)) next.delete(tripId)
     else next.add(tripId)
@@ -373,49 +373,113 @@ export default function HomePage() {
                 const dateRange = start && end ? `${start} → ${end}` : start || end || null
                 const isOwned = trip.owner_id === userId
                 if (!visibleAll.includes(trip)) return null
+
+                // Swipe state
+                const [offsetX, setOffsetX] = React.useState(0)
+                const [swiped, setSwiped] = React.useState(false)
+                const [dragging, setDragging] = React.useState(false)
+                const startX = React.useRef(null)
+                const startY = React.useRef(null)
+                const cardRef = React.useRef(null)
+                const ACTION_WIDTH = isOwned ? 130 : 65
+
+                React.useEffect(() => {
+                  if (!swiped) return
+                  function handleOutside(e) {
+                    if (cardRef.current && !cardRef.current.contains(e.target)) {
+                      setOffsetX(0); setSwiped(false)
+                    }
+                  }
+                  document.addEventListener('mousedown', handleOutside)
+                  document.addEventListener('touchstart', handleOutside, { passive: true })
+                  return () => {
+                    document.removeEventListener('mousedown', handleOutside)
+                    document.removeEventListener('touchstart', handleOutside)
+                  }
+                }, [swiped])
+
+                function getClientX(e) { return e.touches ? e.touches[0].clientX : e.clientX }
+                function getClientY(e) { return e.touches ? e.touches[0].clientY : e.clientY }
+
+                function onDragStart(e) {
+                  startX.current = getClientX(e)
+                  startY.current = getClientY(e)
+                  setDragging(false)
+                }
+                function onDragMove(e) {
+                  if (startX.current === null) return
+                  const dx = getClientX(e) - startX.current
+                  const dy = getClientY(e) - startY.current
+                  if (!dragging && Math.abs(dy) > Math.abs(dx)) { startX.current = null; return }
+                  if (Math.abs(dx) > 4) setDragging(true)
+                  if (dx > 0 && !swiped) return
+                  const base = swiped ? -ACTION_WIDTH : 0
+                  setOffsetX(Math.max(-ACTION_WIDTH, Math.min(0, base + dx)))
+                  if (e.cancelable) e.preventDefault()
+                }
+                function onDragEnd() {
+                  if (offsetX < -(ACTION_WIDTH * 0.4)) { setOffsetX(-ACTION_WIDTH); setSwiped(true) }
+                  else { setOffsetX(0); setSwiped(false) }
+                  startX.current = null; startY.current = null
+                  setTimeout(() => setDragging(false), 50)
+                }
+                function handlePress() {
+                  if (dragging) return
+                  if (swiped) { setOffsetX(0); setSwiped(false); return }
+                  navigate(`/trips/${trip.id}`)
+                }
+
                 return (
-                  <div
-                    onClick={() => navigate(`/trips/${trip.id}`)}
-                    className={`card p-4 flex items-center gap-4 cursor-pointer transition-all duration-150 group
-                      ${isPast
-                        ? 'opacity-50 hover:opacity-75 bg-slate-50 border-slate-200 hover:border-slate-300'
-                        : isPinned
-                          ? 'border-amber-200 hover:border-amber-300 bg-amber-50/30 hover:shadow-md'
-                          : 'hover:border-brand-200 hover:shadow-md'}`}>
-                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0
-                      ${isPast ? 'bg-slate-100' : isPinned ? 'bg-amber-100' : 'bg-brand-50'}`}>
-                      <Plane size={22} className={isPast ? 'text-slate-400' : isPinned ? 'text-amber-500' : 'text-brand-500'} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <p className={`font-semibold truncate transition ${isPast ? 'text-slate-400' : 'text-slate-800 group-hover:text-brand-600'}`}>{trip.name}</p>
-                        {isOwned && !isPast && <Crown size={13} className="text-amber-400 shrink-0" />}
-                        {isPinned && !isPast && <Pin size={11} className="text-amber-400 shrink-0" />}
-                        {isPast && <span className="text-xs font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md shrink-0">Past</span>}
-                      </div>
-                      {dateRange && (
-                        <p className="text-slate-400 text-xs flex items-center gap-1 mt-0.5">
-                          <CalendarDays size={11} /> {dateRange}
-                        </p>
-                      )}
-                      {!isOwned && !isPast && <p className="text-brand-400 text-xs mt-0.5">Shared with you</p>}
-                    </div>
-                    <div className="flex items-center gap-1">
+                  <div className="relative rounded-2xl overflow-hidden" ref={cardRef}>
+                    {/* Action buttons */}
+                    <div className="absolute inset-y-0 right-0 flex" style={{ width: ACTION_WIDTH }}>
                       {!isPast && (
-                        <button onClick={e => togglePin(e, trip.id)} title={isPinned ? 'Unpin' : 'Pin to top'}
-                          className={`p-2 rounded-lg transition
-                            ${isPinned ? 'text-amber-400 hover:text-amber-600 hover:bg-amber-100'
-                                       : 'text-slate-300 hover:text-amber-400 hover:bg-amber-50 opacity-0 group-hover:opacity-100'}`}>
+                        <button onClick={() => { setOffsetX(0); setSwiped(false); togglePin(null, trip.id) }}
+                          className="flex-1 flex flex-col items-center justify-center gap-1 bg-amber-400 hover:bg-amber-500 transition text-white">
                           {isPinned ? <PinOff size={15} /> : <Pin size={15} />}
+                          <span className="text-xs font-medium">{isPinned ? 'Unpin' : 'Pin'}</span>
                         </button>
                       )}
                       {isOwned && (
-                        <button onClick={e => { e.stopPropagation(); setDeleteTarget(trip) }}
-                          className="p-2 rounded-lg text-slate-300 hover:text-red-400 hover:bg-red-50 transition opacity-0 group-hover:opacity-100">
+                        <button onClick={() => { setOffsetX(0); setSwiped(false); setDeleteTarget(trip) }}
+                          className="flex-1 flex flex-col items-center justify-center gap-1 bg-red-500 hover:bg-red-600 transition text-white">
                           <Trash2 size={15} />
+                          <span className="text-xs font-medium">Delete</span>
                         </button>
                       )}
-                      <ChevronRight size={18} className="text-slate-300 group-hover:text-brand-400 transition" />
+                    </div>
+
+                    {/* Card */}
+                    <div
+                      onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}
+                      onMouseDown={onDragStart} onMouseMove={onDragMove} onMouseUp={onDragEnd} onMouseLeave={onDragEnd}
+                      onClick={handlePress}
+                      style={{ transform: `translateX(${offsetX}px)`, transition: dragging ? 'none' : 'transform 0.2s ease' }}
+                      className={`card p-4 flex items-center gap-4 cursor-pointer transition-shadow duration-150 select-none bg-white
+                        ${isPast
+                          ? 'opacity-50 hover:opacity-75 bg-slate-50 border-slate-200'
+                          : isPinned
+                            ? 'border-amber-200 bg-amber-50/30 hover:shadow-md'
+                            : 'hover:border-brand-200 hover:shadow-md'}`}>
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0
+                        ${isPast ? 'bg-slate-100' : isPinned ? 'bg-amber-100' : 'bg-brand-50'}`}>
+                        <Plane size={22} className={isPast ? 'text-slate-400' : isPinned ? 'text-amber-500' : 'text-brand-500'} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className={`font-semibold truncate transition ${isPast ? 'text-slate-400' : 'text-slate-800'}`}>{trip.name}</p>
+                          {isOwned && !isPast && <Crown size={13} className="text-amber-400 shrink-0" />}
+                          {isPinned && !isPast && <Pin size={11} className="text-amber-400 shrink-0" />}
+                          {isPast && <span className="text-xs font-medium text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-md shrink-0">Past</span>}
+                        </div>
+                        {dateRange && (
+                          <p className="text-slate-400 text-xs flex items-center gap-1 mt-0.5">
+                            <CalendarDays size={11} /> {dateRange}
+                          </p>
+                        )}
+                        {!isOwned && !isPast && <p className="text-brand-400 text-xs mt-0.5">Shared with you</p>}
+                      </div>
+                      <ChevronRight size={18} className="text-slate-300 shrink-0" />
                     </div>
                   </div>
                 )
@@ -497,9 +561,6 @@ export default function HomePage() {
               onClick={() => { setEditingName(true); setEditName(displayName); setEditNationality(nationality); setSaveSuccess(false); setSaveError('') }}
               className="btn-secondary w-full">
               <Pencil size={14} /> Edit Profile
-            </button>
-            <button onClick={() => setProfileOpen(false)} className="btn-secondary w-full">
-              Close
             </button>
           </div>
         ) : (

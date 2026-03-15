@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { addExpense, updateExpense, getExpenseParticipants, getExpensePayers } from '../lib/db'
 import { fmtAmt } from '../lib/utils'
 import { toBase, toSecondary, getBaseCurrency } from '../lib/currencies'
-import { PageHeader, Field, Spinner, Avatar } from '../components/ui'
+import { PageHeader, Field, Spinner, Avatar, DateInput } from '../components/ui'
 import { ReceiptText, Users, SplitSquareHorizontal, ArrowLeftRight } from 'lucide-react'
 
 export default function AddExpensePage({ editMode = false }) {
@@ -122,6 +122,7 @@ export default function AddExpensePage({ editMode = false }) {
   function validate() {
     const errs = {}
     if (!title.trim()) errs.title = 'Required'
+    if (!date) errs.date = 'Date is required'
     if (!amount || amountNum <= 0) errs.amount = 'Enter a valid amount'
     if (selectedParticipants.length === 0) errs.participants = 'Select at least one participant'
     if (multiPayer) {
@@ -200,7 +201,7 @@ export default function AddExpensePage({ editMode = false }) {
                     <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded font-medium">{currency}</span>
                   )}
                 </div>
-                <input type="number" step="0.01" min="0" value={amount}
+                <input type="text" inputMode="decimal" value={amount}
                   onChange={e => setAmount(e.target.value)}
                   className="input pl-16 text-right font-semibold" placeholder="0.00" />
               </div>
@@ -211,11 +212,13 @@ export default function AddExpensePage({ editMode = false }) {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Date">
-                <input type="date" value={date} onChange={e => setDate(e.target.value)} className="input text-sm" />
+              <Field label="Date" error={errors.date}>
+                <DateInput value={date} onChange={setDate} />
               </Field>
               <Field label="Note (optional)">
-                <input value={note} onChange={e => setNote(e.target.value)} className="input" placeholder="Any notes..." />
+                <textarea value={note} onChange={e => setNote(e.target.value)}
+                  className="input resize-none leading-tight" placeholder="Any notes..."
+                  rows={2} style={{ minHeight: 0 }} />
               </Field>
             </div>
           </div>
@@ -254,7 +257,7 @@ export default function AddExpensePage({ editMode = false }) {
                     <Avatar name={m.name} size="sm" />
                     <span className="flex-1 text-sm font-medium text-slate-700">{m.name}</span>
                     {selectedPayers[m.id] && (
-                      <input type="number" step="0.01" min="0"
+                      <input type="text" inputMode="decimal"
                         value={payerAmounts[m.id] || ''}
                         onChange={e => setPayerAmounts(prev => ({ ...prev, [m.id]: e.target.value }))}
                         placeholder="Amount"
@@ -300,7 +303,7 @@ export default function AddExpensePage({ editMode = false }) {
                     </span>
                   )}
                   {splitType === 'custom' && selectedParticipants.includes(m.id) && (
-                    <input type="number" step="0.01" min="0"
+                    <input type="text" inputMode="decimal"
                       value={customShares[m.id] || ''}
                       onChange={e => setCustomShares(prev => ({ ...prev, [m.id]: e.target.value }))}
                       placeholder="Share"

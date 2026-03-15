@@ -1,20 +1,150 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import {
   getExpenses, getTripMembers, getExMembers,
   addTripMembersByName, inviteMemberByEmail,
   deactivateMember, reactivateMember, updateTrip, updateTripCurrency,
-  getPendingInvites, cancelInvite, isOwner, linkGuestByEmail
+  getPendingInvites, cancelInvite, isOwner, linkGuestByEmail, deleteExpense
 } from '../lib/db'
 import { fmtAmt, fmtDate, fmtDateShort } from '../lib/utils'
 import { toBase, toSecondary, getBaseCurrency } from '../lib/currencies'
 import {
   Plus, Users, CalendarDays, ReceiptText, Trash2,
   ChevronRight, BarChart3, UserMinus, UserPlus,
-  Pencil, Mail, X, Link, Crown, Clock, UserCheck, Coins, ArrowLeftRight
+  Pencil, Mail, X, Link, Crown, Clock, UserCheck, Coins, ArrowLeftRight, ArrowUpDown
 } from 'lucide-react'
-import { PageHeader, Modal, ConfirmDialog, Spinner, EmptyState, Avatar, Field } from '../components/ui'
+import { PageHeader, Modal, ConfirmDialog, Spinner, EmptyState, Avatar, Field, DateRangePicker } from '../components/ui'
+
+// ── Swipeable Expense Card ────────────────────────────────────────────────
+function SwipeableExpenseCard({ exp, payer, hasSecondary, trip, secSymbol, baseCur, onPress, onEdit, onDelete }) {
+  const [offsetX, setOffsetX] = useState(0)
+  const [swiped, setSwiped] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const startX = useRef(null)
+  const startY = useRef(null)
+  const cardRef = useRef(null)
+  const ACTION_WIDTH = 130
+
+  // Close when clicking outside
+  useEffect(() => {
+    if (!swiped) return
+    function handleOutside(e) {
+      if (cardRef.current && !cardRef.current.contains(e.target)) close()
+    }
+    document.addEventListener('mousedown', handleOutside)
+    document.addEventListener('touchstart', handleOutside, { passive: true })
+    return () => {
+      document.removeEventListener('mousedown', handleOutside)
+      document.removeEventListener('touchstart', handleOutside)
+    }
+  }, [swiped])
+
+  function getClientX(e) {
+    return e.touches ? e.touches[0].clientX : e.clientX
+  }
+  function getClientY(e) {
+    return e.touches ? e.touches[0].clientY : e.clientY
+  }
+
+  function onDragStart(e) {
+    startX.current = getClientX(e)
+    startY.current = getClientY(e)
+    setDragging(false)
+  }
+
+  function onDragMove(e) {
+    if (startX.current === null) return
+    const dx = getClientX(e) - startX.current
+    const dy = getClientY(e) - startY.current
+    if (!dragging && Math.abs(dy) > Math.abs(dx)) { startX.current = null; return }
+    if (Math.abs(dx) > 4) setDragging(true)
+    if (dx > 0 && !swiped) return
+    const base = swiped ? -ACTION_WIDTH : 0
+    const newOffset = Math.max(-ACTION_WIDTH, Math.min(0, base + dx))
+    setOffsetX(newOffset)
+    if (e.cancelable) e.preventDefault()
+  }
+
+  function onDragEnd() {
+    const threshold = ACTION_WIDTH * 0.4
+    if (offsetX < -threshold) {
+      setOffsetX(-ACTION_WIDTH)
+      setSwiped(true)
+    } else {
+      setOffsetX(0)
+      setSwiped(false)
+    }
+    startX.current = null
+    startY.current = null
+    setTimeout(() => setDragging(false), 50)
+  }
+
+  function close() {
+    setOffsetX(0)
+    setSwiped(false)
+  }
+
+  function handlePress() {
+    if (dragging) return
+    if (swiped) { close(); return }
+    onPress()
+  }
+
+  return (
+    <div className="relative rounded-2xl overflow-hidden" ref={cardRef}>
+      {/* Action buttons */}
+      <div className="absolute inset-y-0 right-0 flex" style={{ width: ACTION_WIDTH }}>
+        <button
+          onClick={() => { close(); onEdit() }}
+          className="flex-1 flex flex-col items-center justify-center gap-1 bg-brand-500 hover:bg-brand-600 transition text-white">
+          <Pencil size={16} />
+          <span className="text-xs font-medium">Edit</span>
+        </button>
+        <button
+          onClick={() => { close(); onDelete() }}
+          className="flex-1 flex flex-col items-center justify-center gap-1 bg-red-500 hover:bg-red-600 transition text-white">
+          <Trash2 size={16} />
+          <span className="text-xs font-medium">Delete</span>
+        </button>
+      </div>
+
+      {/* Card */}
+      <div
+        onTouchStart={onDragStart}
+        onTouchMove={onDragMove}
+        onTouchEnd={onDragEnd}
+        onMouseDown={onDragStart}
+        onMouseMove={onDragMove}
+        onMouseUp={onDragEnd}
+        onMouseLeave={onDragEnd}
+        onClick={handlePress}
+        style={{ transform: `translateX(${offsetX}px)`, transition: dragging ? 'none' : 'transform 0.2s ease' }}
+        className="card p-4 flex items-center gap-3 cursor-pointer hover:shadow-md hover:border-brand-100 transition-shadow group relative bg-white select-none">
+        <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center shrink-0">
+          <ReceiptText size={18} className="text-slate-400" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-slate-800 truncate group-hover:text-brand-600 transition">{exp.title}</p>
+          <p className="text-slate-400 text-xs mt-0.5 flex items-center gap-1">
+            <CalendarDays size={11} />
+            {fmtDate(exp.date, 'MMM d, yyyy')}
+            {' · '}
+            {exp.paid_by === 'MULTIPLE' ? 'Multiple payers' : `Paid by ${payer?.name || '?'}`}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="font-bold text-brand-600">
+            {hasSecondary
+              ? `${exp.currency === trip.secondary_currency ? secSymbol : baseCur.symbol} ${fmtAmt(exp.amount)}`
+              : `${baseCur.symbol} ${fmtAmt(exp.amount)}`}
+          </p>
+          <ChevronRight size={15} className="text-slate-300 group-hover:text-brand-400 transition ml-auto mt-0.5" />
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function TripDetailPage() {
   const { tripId } = useParams()
@@ -22,6 +152,7 @@ export default function TripDetailPage() {
 
   const [trip, setTrip] = useState(null)
   const [expenses, setExpenses] = useState([])
+  const [expenseSort, setExpenseSort] = useState('desc') // 'desc' = newest date first, 'asc' = oldest first
   const [members, setMembers] = useState([])
   const [exMembers, setExMembers] = useState([])
   const [pendingInvites, setPendingInvites] = useState([])
@@ -33,6 +164,7 @@ export default function TripDetailPage() {
   const [editTripOpen, setEditTripOpen] = useState(false)
   const [removeTarget, setRemoveTarget] = useState(null)
   const [cancelInviteTarget, setCancelInviteTarget] = useState(null)
+  const [expenseDeleteTarget, setExpenseDeleteTarget] = useState(null)
 
   // Add member tabs: 'name' | 'email'
   const [addTab, setAddTab] = useState('name')
@@ -51,6 +183,7 @@ export default function TripDetailPage() {
   // Currency modal
   const [currencyModalOpen, setCurrencyModalOpen] = useState(false)
   const [editRate, setEditRate] = useState('')
+  const [originalEditRate, setOriginalEditRate] = useState('')
   const [editRateDirection, setEditRateDirection] = useState('base_to_secondary')
   const [currencySaving, setCurrencySaving] = useState(false)
 
@@ -156,6 +289,12 @@ export default function TripDetailPage() {
     load()
   }
 
+  async function handleDeleteExpense() {
+    await deleteExpense(expenseDeleteTarget.id)
+    setExpenseDeleteTarget(null)
+    load()
+  }
+
   async function saveCurrency() {
     if (!editRate || parseFloat(editRate) <= 0) return
     setCurrencySaving(true)
@@ -172,10 +311,14 @@ export default function TripDetailPage() {
   }
 
   function swapEditRate() {
-    setEditRateDirection(d => d === 'base_to_secondary' ? 'secondary_to_base' : 'base_to_secondary')
-    if (editRate) {
-      const r = parseFloat(editRate)
-      if (r > 0) setEditRate((1 / r).toFixed(6).replace(/\.?0+$/, ''))
+    const newDir = editRateDirection === 'base_to_secondary' ? 'secondary_to_base' : 'base_to_secondary'
+    setEditRateDirection(newDir)
+    const orig = parseFloat(originalEditRate)
+    if (orig > 0) {
+      const swapped = newDir !== 'base_to_secondary'
+        ? (1 / orig)
+        : orig
+      setEditRate(swapped === orig ? originalEditRate : swapped.toFixed(6).replace(/\.?0+$/, ''))
     }
   }
 
@@ -255,6 +398,7 @@ export default function TripDetailPage() {
               {hasSecondary && (
                 <button onClick={() => {
                   setEditRate(trip.secondary_currency_rate?.toString() || '')
+                  setOriginalEditRate(trip.secondary_currency_rate?.toString() || '')
                   setEditRateDirection(trip.rate_direction || 'base_to_secondary')
                   setCurrencyModalOpen(true)
                 }} className="p-1 rounded-lg hover:bg-white/20 transition" title="Edit exchange rate">
@@ -289,42 +433,45 @@ export default function TripDetailPage() {
         </div>
 
         <div>
-          <p className="section-title flex items-center gap-1.5 px-1">
-            <ReceiptText size={12} /> Expenses ({expenses.length})
-          </p>
+          <div className="flex items-center justify-between px-1 mb-2">
+            <p className="section-title flex items-center gap-1.5 mb-0">
+              <ReceiptText size={12} /> Expenses ({expenses.length})
+            </p>
+            {expenses.length > 1 && (
+              <button
+                onClick={() => setExpenseSort(s => s === 'desc' ? 'asc' : 'desc')}
+                className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-600 bg-white border border-slate-200 hover:border-brand-300 px-2.5 py-1.5 rounded-xl transition">
+                <ArrowUpDown size={12} />
+                {expenseSort === 'desc' ? 'Newest first' : 'Oldest first'}
+              </button>
+            )}
+          </div>
           {expenses.length === 0 ? (
             <div className="card">
               <EmptyState icon={ReceiptText} title="No expenses yet" subtitle="Tap 'Add Expense' to record one" />
             </div>
           ) : (
             <div className="space-y-2">
-              {expenses.map(exp => {
+              {[...expenses]
+                .sort((a, b) => expenseSort === 'desc'
+                  ? new Date(b.date) - new Date(a.date)
+                  : new Date(a.date) - new Date(b.date)
+                )
+                .map(exp => {
                 const payer = exp.paid_by === 'MULTIPLE' ? null : personMap[exp.paid_by]
                 return (
-                  <div key={exp.id}
-                    onClick={() => navigate(`/trips/${tripId}/expenses/${exp.id}`, { state: { members: [...members, ...exMembers], trip } })}
-                    className="card p-4 flex items-center gap-3 cursor-pointer hover:shadow-md hover:border-brand-100 transition-all group">
-                    <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center shrink-0">
-                      <ReceiptText size={18} className="text-slate-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-slate-800 truncate group-hover:text-brand-600 transition">{exp.title}</p>
-                      <p className="text-slate-400 text-xs mt-0.5 flex items-center gap-1">
-                        <CalendarDays size={11} />
-                        {fmtDate(exp.date, 'MMM d, yyyy')}
-                        {' · '}
-                        {exp.paid_by === 'MULTIPLE' ? 'Multiple payers' : `Paid by ${payer?.name || '?'}`}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="font-bold text-brand-600">
-                        {hasSecondary
-                          ? `${exp.currency === trip.secondary_currency ? secSymbol : baseCur.symbol} ${fmtAmt(exp.amount)}`
-                          : `${baseCur.symbol} ${fmtAmt(exp.amount)}`}
-                      </p>
-                      <ChevronRight size={15} className="text-slate-300 group-hover:text-brand-400 transition ml-auto mt-0.5" />
-                    </div>
-                  </div>
+                  <SwipeableExpenseCard
+                    key={exp.id}
+                    exp={exp}
+                    payer={payer}
+                    hasSecondary={hasSecondary}
+                    trip={trip}
+                    secSymbol={secSymbol}
+                    baseCur={baseCur}
+                    onPress={() => navigate(`/trips/${tripId}/expenses/${exp.id}`, { state: { members: [...members, ...exMembers], trip } })}
+                    onEdit={() => navigate(`/trips/${tripId}/expenses/${exp.id}/edit`, { state: { members: [...members, ...exMembers], expense: exp, trip } })}
+                    onDelete={() => setExpenseDeleteTarget(exp)}
+                  />
                 )
               })}
             </div>
@@ -497,17 +644,13 @@ export default function TripDetailPage() {
           <Field label="Trip Name">
             <input value={editName} onChange={e => setEditName(e.target.value)} className="input" />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Start Date">
-              <input type="date" value={editStart}
-                onChange={e => { setEditStart(e.target.value); if (editEnd && e.target.value > editEnd) setEditEnd('') }}
-                className="input text-sm" />
-            </Field>
-            <Field label="End Date" error={editStart && editEnd && editEnd < editStart ? 'End date cannot be before start date' : ''}>
-              <input type="date" value={editEnd} min={editStart || undefined}
-                onChange={e => setEditEnd(e.target.value)} className="input text-sm" />
-            </Field>
-          </div>
+            <DateRangePicker
+              startDate={editStart}
+              endDate={editEnd}
+              onStartChange={setEditStart}
+              onEndChange={setEditEnd}
+              endDateError={editStart && editEnd && editEnd < editStart ? 'End date cannot be before start date' : ''}
+            />
           <div className="flex gap-3 pt-2">
             <button onClick={() => setEditTripOpen(false)} className="btn-secondary flex-1">Cancel</button>
             <button onClick={saveEditTrip} disabled={editSaving} className="btn-primary flex-1">
@@ -538,8 +681,8 @@ export default function TripDetailPage() {
                   </span>
                 </div>
                 <span className="text-slate-400 text-sm font-medium shrink-0">1 =</span>
-                <input type="number" step="any" min="0" value={editRate}
-                  onChange={e => setEditRate(e.target.value)}
+                <input type="text" inputMode="decimal" value={editRate}
+                  onChange={e => { setEditRate(e.target.value); setOriginalEditRate(e.target.value) }}
                   className="input flex-1 text-center font-semibold" placeholder="0.00" />
                 <div className="flex items-center gap-1.5 bg-brand-50 border border-brand-200 rounded-xl px-3 py-2.5 shrink-0">
                   <span className="font-bold text-brand-600 text-sm">
@@ -619,6 +762,16 @@ export default function TripDetailPage() {
           )}
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={!!expenseDeleteTarget}
+        onClose={() => setExpenseDeleteTarget(null)}
+        onConfirm={handleDeleteExpense}
+        title="Delete Expense"
+        message={`Delete "${expenseDeleteTarget?.title}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+      />
 
       <ConfirmDialog
         open={!!removeTarget}

@@ -1,10 +1,10 @@
 import { initials, avatarColor } from '../lib/utils'
-import { X, Loader2 } from 'lucide-react'
+import { X, Loader2, CalendarDays, XCircle } from 'lucide-react'
 
 // ── Avatar ─────────────────────────────────────────────────────────────────
 export function Avatar({ name, size = 'md' }) {
   const colors = avatarColor(name)
-  const sizes = { sm: 'w-7 h-7 text-xs', md: 'w-9 h-9 text-sm', lg: 'w-11 h-11 text-base' }
+  const sizes = { xs: 'w-6 h-6 text-xs', sm: 'w-7 h-7 text-xs', md: 'w-9 h-9 text-sm', lg: 'w-16 h-16 text-xl' }
   return (
     <div className={`${sizes[size]} ${colors} rounded-full flex items-center justify-center font-semibold shrink-0`}>
       {initials(name)}
@@ -131,6 +131,64 @@ export function Field({ label, error, children }) {
       {label && <label className="label">{label}</label>}
       {children}
       {error && <p className="text-red-500 text-xs mt-1">{error}</p>}
+    </div>
+  )
+}
+
+// ── DateInput ──────────────────────────────────────────────────────────────
+// Safari-safe date input with manual clear button
+// Does NOT use min attr (Safari ignores it) — validate on submit instead
+export function DateInput({ value, onChange, placeholder = 'Select date', className = '' }) {
+  return (
+    <div className="relative">
+      <CalendarDays size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-10" />
+      <input
+        type="date"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className={`input pl-9 ${value ? 'pr-8' : ''} text-sm ${className}`}
+        placeholder={placeholder}
+      />
+      {/* Manual clear button — needed for Safari where native clear doesn't fire onChange */}
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition">
+          <XCircle size={15} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ── DateRangePicker ────────────────────────────────────────────────────────
+// Stacks vertically on mobile, side by side on sm+ screens
+// Clears end date automatically if start date is set after it
+export function DateRangePicker({ startDate, endDate, onStartChange, onEndChange, endDateError }) {
+  function handleStartChange(val) {
+    onStartChange(val)
+    // Clear end date if it would become invalid
+    if (endDate && val && val > endDate) onEndChange('')
+  }
+
+  function handleEndChange(val) {
+    // Validate: don't allow end before start (submit-time validation handles the rest)
+    if (startDate && val && val < startDate) return
+    onEndChange(val)
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row gap-3">
+      <div className="flex-1">
+        <label className="label">Start Date</label>
+        <DateInput value={startDate} onChange={handleStartChange} />
+      </div>
+      <div className="flex-1">
+        <label className="label">End Date</label>
+        <DateInput value={endDate} onChange={handleEndChange} />
+        {endDateError && <p className="text-red-500 text-xs mt-1">{endDateError}</p>}
+      </div>
     </div>
   )
 }
