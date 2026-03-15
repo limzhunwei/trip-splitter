@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { createTrip, addTripMembersByName, inviteMemberByEmail } from '../lib/db'
 import { supabase } from '../lib/supabase'
 import { CURRENCIES, MYR, getCurrency, getCurrencyForNationality } from '../lib/currencies'
-import { PageHeader, Field, Spinner, Avatar } from '../components/ui'
-import { UserPlus, X, CalendarDays, Tag, Mail, User, Crown, ArrowLeftRight, DollarSign, ChevronDown, Search } from 'lucide-react'
+import { PageHeader, Field, Spinner, Avatar, DateRangePicker } from '../components/ui'
+import { UserPlus, X, Tag, Mail, User, Crown, ArrowLeftRight, DollarSign, ChevronDown, Search } from 'lucide-react'
 
 export default function CreateTripPage() {
   const navigate = useNavigate()
@@ -21,9 +21,12 @@ export default function CreateTripPage() {
 
   // Currency
   const [baseCurrency, setBaseCurrency] = useState(MYR) // driven by user nationality
+  const [baseCurrencySearch, setBaseCurrencySearch] = useState('')
+  const [baseCurrencyDropdownOpen, setBaseCurrencyDropdownOpen] = useState(false)
   const [useCurrency, setUseCurrency] = useState(false)
   const [selectedCurrency, setSelectedCurrency] = useState(null)
   const [rate, setRate] = useState('')
+  const [originalRate, setOriginalRate] = useState('')  // always the user-entered rate
   const [rateDirection, setRateDirection] = useState('base_to_secondary')
   const [currencySearch, setCurrencySearch] = useState('')
   const [currencyDropdownOpen, setCurrencyDropdownOpen] = useState(false)
@@ -53,10 +56,15 @@ export default function CreateTripPage() {
   )
 
   function swapRate() {
-    setRateDirection(d => d === 'base_to_secondary' ? 'secondary_to_base' : 'base_to_secondary')
-    if (rate) {
-      const r = parseFloat(rate)
-      if (r > 0) setRate((1 / r).toFixed(6).replace(/\.?0+$/, ''))
+    const newDir = rateDirection === 'base_to_secondary' ? 'secondary_to_base' : 'base_to_secondary'
+    setRateDirection(newDir)
+    // Always derive display rate from the original entered value — no accumulated rounding
+    const orig = parseFloat(originalRate)
+    if (orig > 0) {
+      const swapped = newDir !== 'base_to_secondary'
+        ? (1 / orig)   // showing inverse
+        : orig          // back to original
+      setRate(swapped === orig ? originalRate : swapped.toFixed(6).replace(/\.?0+$/, ''))
     }
   }
 
@@ -134,46 +142,75 @@ export default function CreateTripPage() {
             <Field label="Trip Name" error={errors.name}>
               <input value={name} onChange={e => setName(e.target.value)} className="input" placeholder="e.g. Bangkok Trip 2025" />
             </Field>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Start Date">
-                <div className="relative">
-                  <CalendarDays size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input type="date" value={startDate} onChange={e => { setStartDate(e.target.value); if (endDate && e.target.value > endDate) setEndDate('') }} className="input pl-9 text-sm" />
-                </div>
-              </Field>
-              <Field label="End Date" error={errors.endDate}>
-                <div className="relative">
-                  <CalendarDays size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input type="date" value={endDate} min={startDate || undefined} onChange={e => setEndDate(e.target.value)} className="input pl-9 text-sm" />
-                </div>
-              </Field>
-            </div>
+            <DateRangePicker
+              startDate={startDate}
+              endDate={endDate}
+              onStartChange={setStartDate}
+              onEndChange={setEndDate}
+              endDateError={errors.endDate}
+            />
           </div>
 
           {/* Currency */}
           <div className="card p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="section-title mb-0 flex items-center gap-1.5"><DollarSign size={12} /> Trip Currency</p>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <span className="text-xs text-slate-500">Add 2nd currency</span>
-                <div onClick={() => { setUseCurrency(!useCurrency); setErrors({}) }}
-                  className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer ${useCurrency ? 'bg-brand-500' : 'bg-slate-200'}`}>
-                  <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${useCurrency ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                </div>
-              </label>
-            </div>
-
-            {!useCurrency ? (
-              <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
-                <div className="w-8 h-8 bg-emerald-100 rounded-lg flex items-center justify-center">
-                  <span className="text-emerald-600 font-bold text-sm">{baseCurrency.symbol}</span>
-                </div>
-                <div>
-                  <p className="font-medium text-slate-700 text-sm">{baseCurrency.name} ({baseCurrency.code})</p>
-                  <p className="text-slate-400 text-xs">Toggle above to add a 2nd currency for this trip</p>
-                </div>
+            <p className="section-title flex items-center gap-1.5"><DollarSign size={12} /> Trip Currency</p>
+            {/* Base currency — user can override nationality default */}
+            <Field label="Base Currency">
+              <div className="relative">
+                <button type="button" onClick={() => setBaseCurrencyDropdownOpen(!baseCurrencyDropdownOpen)}
+                  className="input w-full flex items-center justify-between text-left">
+                  <span className="flex items-center gap-2">
+                    <span className="font-bold text-emerald-600 w-10 text-sm">{baseCurrency.code}</span>
+                    <span className="text-slate-600 text-sm">{baseCurrency.name}</span>
+                    <span className="text-slate-400 text-xs">({baseCurrency.symbol})</span>
+                  </span>
+                  <ChevronDown size={15} className="text-slate-400 shrink-0" />
+                </button>
+                {baseCurrencyDropdownOpen && (
+                  <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+                    <div className="p-2 border-b border-slate-100">
+                      <div className="relative">
+                        <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input autoFocus value={baseCurrencySearch} onChange={e => setBaseCurrencySearch(e.target.value)}
+                          className="w-full pl-8 pr-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-brand-400"
+                          placeholder="Search currency..." />
+                      </div>
+                    </div>
+                    <div className="max-h-52 overflow-y-auto">
+                      {CURRENCIES.filter(c =>
+                        c.name.toLowerCase().includes(baseCurrencySearch.toLowerCase()) ||
+                        c.code.toLowerCase().includes(baseCurrencySearch.toLowerCase())
+                      ).map(c => (
+                        <button key={c.code} type="button"
+                          onClick={() => {
+                            setBaseCurrency(c)
+                            setBaseCurrencyDropdownOpen(false)
+                            setBaseCurrencySearch('')
+                            // Clear secondary if same as new base
+                            if (selectedCurrency?.code === c.code) setSelectedCurrency(null)
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-slate-50 transition text-sm
+                            ${baseCurrency.code === c.code ? 'bg-emerald-50 text-emerald-700' : 'text-slate-700'}`}>
+                          <span className="font-bold w-10 text-xs text-slate-500">{c.code}</span>
+                          <span className="flex-1">{c.name}</span>
+                          <span className="text-slate-400 text-xs">{c.symbol}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
-            ) : (
+              <p className="text-slate-400 text-xs mt-1">Default from your nationality — change if needed</p>
+            </Field>
+
+            <div className="flex items-center justify-between">
+              <p className="section-title mb-0 text-xs text-slate-500">Add 2nd currency</p>
+              <div onClick={() => { setUseCurrency(!useCurrency); setErrors({}) }}
+                className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer ${useCurrency ? 'bg-brand-500' : 'bg-slate-200'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${useCurrency ? 'translate-x-5' : 'translate-x-0.5'}`} />
+              </div>
+            </div>
+            {useCurrency && (
               <div className="space-y-4">
                 <Field label="Foreign Currency" error={errors.currency}>
                   <div className="relative">
@@ -225,7 +262,7 @@ export default function CreateTripPage() {
                           <span className="text-slate-500 text-xs font-medium">{leftCurrency?.code}</span>
                         </div>
                         <span className="text-slate-400 text-sm font-medium shrink-0">1 =</span>
-                        <input type="number" step="any" min="0" value={rate} onChange={e => setRate(e.target.value)}
+                        <input type="text" inputMode="decimal" value={rate} onChange={e => { setRate(e.target.value); setOriginalRate(e.target.value) }}
                           className="input flex-1 text-center font-semibold" placeholder="0.00" />
                         <div className="flex items-center gap-1.5 bg-brand-50 border border-brand-200 rounded-xl px-3 py-2.5 shrink-0">
                           <span className="font-bold text-brand-600 text-sm">{rightCurrency?.symbol}</span>
@@ -248,9 +285,8 @@ export default function CreateTripPage() {
                 {selectedCurrency && rate && parseFloat(rate) > 0 && (
                   <div className="bg-brand-50 border border-brand-100 rounded-xl p-3 space-y-1">
                     <p className="text-brand-700 text-xs font-semibold">Currency setup summary:</p>
-                    <p className="text-brand-600 text-xs">• Default currency: <strong>{selectedCurrency.name} ({selectedCurrency.symbol})</strong></p>
-                    <p className="text-brand-600 text-xs">• Secondary currency: <strong>Malaysian Ringgit (RM)</strong></p>
-                    <p className="text-brand-600 text-xs">• Expenses will show both {selectedCurrency.code} and MYR values</p>
+                    <p className="text-brand-600 text-xs">• Base currency: <strong>{baseCurrency.name} ({baseCurrency.symbol})</strong></p>
+                    <p className="text-brand-600 text-xs">• 2nd currency: <strong>{selectedCurrency.name} ({selectedCurrency.symbol})</strong></p>
                   </div>
                 )}
               </div>
