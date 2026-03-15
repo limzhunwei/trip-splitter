@@ -1,5 +1,6 @@
+import { useState, useRef, useEffect } from 'react'
 import { initials, avatarColor } from '../lib/utils'
-import { X, Loader2, CalendarDays, XCircle } from 'lucide-react'
+import { X, Loader2, ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react'
 
 // ── Avatar ─────────────────────────────────────────────────────────────────
 export function Avatar({ name, size = 'md' }) {
@@ -22,9 +23,7 @@ export function Badge({ children, color = 'slate' }) {
     amber: 'bg-amber-100 text-amber-700',
     purple: 'bg-violet-100 text-violet-700',
   }
-  return (
-    <span className={`badge ${colors[color]}`}>{children}</span>
-  )
+  return <span className={`badge ${colors[color]}`}>{children}</span>
 }
 
 // ── Spinner ────────────────────────────────────────────────────────────────
@@ -86,12 +85,9 @@ export function Tabs({ tabs, active, onChange }) {
   return (
     <div className="flex bg-slate-100 rounded-xl p-1 gap-1">
       {tabs.map(t => (
-        <button
-          key={t.id}
-          onClick={() => onChange(t.id)}
+        <button key={t.id} onClick={() => onChange(t.id)}
           className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-sm font-medium transition-all duration-150
-            ${active === t.id ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-        >
+            ${active === t.id ? 'bg-white text-brand-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
           {t.icon && <t.icon size={15} />}
           {t.label}
         </button>
@@ -135,64 +131,282 @@ export function Field({ label, error, children }) {
   )
 }
 
-// ── DateInput ──────────────────────────────────────────────────────────────
-// Safari-safe date input with manual clear button
-export function DateInput({ value, onChange, placeholder = 'Select date', className = '' }) {
-  // Safari doesn't fire onChange when user taps the native "clear/reset" button
-  // Using onInput as well catches it
-  function handleChange(e) {
-    onChange(e.target.value)
+// ── Date helpers ───────────────────────────────────────────────────────────
+const MONTHS_LONG  = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+const DAYS_SHORT   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
+
+// Parse 'yyyy-MM-dd' → { y, m, d }  (m is 1-based)
+function parseYMD(str) {
+  if (!str) return null
+  const [y, m, d] = str.split('-').map(Number)
+  return { y, m, d }
+}
+
+// Format { y, m, d } → 'yyyy-MM-dd'
+function toYMD({ y, m, d }) {
+  return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+}
+
+// Display: 'Mar 15, 2025'
+function displayDate(str) {
+  const p = parseYMD(str)
+  if (!p) return ''
+  return `${MONTHS_SHORT[p.m - 1]} ${p.d}, ${p.y}`
+}
+
+function daysInMonth(y, m)    { return new Date(y, m, 0).getDate() }
+function firstDayOfMonth(y, m) { return new Date(y, m - 1, 1).getDay() }
+
+// Compare two 'yyyy-MM-dd' strings — returns negative if a < b
+function cmpDate(a, b) { return a < b ? -1 : a > b ? 1 : 0 }
+
+// ── Calendar Popup ─────────────────────────────────────────────────────────
+// pickMode: null = day grid | 'month' = month grid | 'year' = year grid
+// minDate: 'yyyy-MM-dd' — days before this are greyed and unclickable
+function CalendarPopup({ value, onChange, onClose, anchorRef, minDate }) {
+  const today    = new Date()
+  const initial  = parseYMD(value) || { y: today.getFullYear(), m: today.getMonth() + 1, d: today.getDate() }
+  const [viewY, setViewY]     = useState(initial.y)
+  const [viewM, setViewM]     = useState(initial.m)
+  const [pickMode, setPickMode] = useState(null) // null | 'month' | 'year'
+  const popupRef = useRef(null)
+
+  // Close on outside tap/click
+  useEffect(() => {
+    function onDown(e) {
+      if (
+        popupRef.current  && !popupRef.current.contains(e.target) &&
+        anchorRef.current && !anchorRef.current.contains(e.target)
+      ) onClose()
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('touchstart', onDown, { passive: true })
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('touchstart', onDown)
+    }
+  }, [])
+
+  function prevMonth() {
+    if (viewM === 1) { setViewM(12); setViewY(y => y - 1) }
+    else setViewM(m => m - 1)
+  }
+  function nextMonth() {
+    if (viewM === 12) { setViewM(1); setViewY(y => y + 1) }
+    else setViewM(m => m + 1)
   }
 
+  function selectDay(d) {
+    const str = toYMD({ y: viewY, m: viewM, d })
+    if (minDate && cmpDate(str, minDate) < 0) return // blocked
+    onChange(str)
+    onClose()
+  }
+
+  function selectMonth(m) {
+    setViewM(m)
+    setPickMode(null) // go back to day grid
+  }
+
+  function selectYear(yr) {
+    setViewY(yr)
+    setPickMode('month') // after picking year → pick month
+  }
+
+  // Header button cycles: day → month → year → day
+  function handleHeaderClick() {
+    setPickMode(m => m === null ? 'month' : m === 'month' ? 'year' : null)
+  }
+
+  const selected   = parseYMD(value)
+  const totalDays  = daysInMonth(viewY, viewM)
+  const startDow   = firstDayOfMonth(viewY, viewM)
+  const currentYear = today.getFullYear()
+  const years = Array.from({ length: 21 }, (_, i) => currentYear - 10 + i)
+
+  // Is a given day-string before the minDate?
+  function isDisabled(d) {
+    if (!minDate) return false
+    return cmpDate(toYMD({ y: viewY, m: viewM, d }), minDate) < 0
+  }
+
+  // Is the entire month before minDate's month? (grey prev arrow)
+  const minParsed = parseYMD(minDate)
+
   return (
-    <div className="relative w-full min-w-0">
-      <CalendarDays size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-10" />
-      <input
-        type="date"
-        value={value}
-        onChange={handleChange}
-        onInput={handleChange}
-        className={`input pl-9 w-full min-w-0 text-sm ${value ? 'pr-8' : ''} ${className}`}
-        style={{ maxWidth: '100%' }}
-      />
-      {/* Manual clear — Safari native clear button doesn't reliably fire onChange */}
-      {value && (
-        <button
-          type="button"
-          onClick={() => onChange('')}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition z-10">
-          <XCircle size={15} />
+    <div
+      ref={popupRef}
+      className="absolute z-50 mt-1 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden"
+      style={{ minWidth: 280, width: '100%' }}
+    >
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-slate-100">
+        <button type="button" onClick={prevMonth}
+          className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition">
+          <ChevronLeft size={16} />
         </button>
+
+        {/* Tap to cycle: day → month picker → year picker */}
+        <button type="button" onClick={handleHeaderClick}
+          className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-slate-100 transition font-semibold text-slate-700 text-sm">
+          {MONTHS_LONG[viewM - 1]} {viewY}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+            className={`transition-transform ${pickMode ? 'rotate-180' : ''}`}>
+            <path d="m6 9 6 6 6-6"/>
+          </svg>
+        </button>
+
+        <button type="button" onClick={nextMonth}
+          className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+
+      {/* ── Year picker ── */}
+      {pickMode === 'year' && (
+        <div className="max-h-44 overflow-y-auto p-2 grid grid-cols-4 gap-1 border-b border-slate-100">
+          {years.map(yr => (
+            <button key={yr} type="button" onClick={() => selectYear(yr)}
+              className={`py-1.5 rounded-lg text-xs font-medium transition
+                ${yr === viewY ? 'bg-brand-500 text-white' : 'hover:bg-slate-100 text-slate-600'}`}>
+              {yr}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Month picker ── */}
+      {pickMode === 'month' && (
+        <div className="p-2 grid grid-cols-3 gap-1.5 border-b border-slate-100">
+          {MONTHS_SHORT.map((name, idx) => {
+            const m = idx + 1
+            return (
+              <button key={m} type="button" onClick={() => selectMonth(m)}
+                className={`py-2 rounded-xl text-sm font-medium transition
+                  ${m === viewM ? 'bg-brand-500 text-white' : 'hover:bg-slate-100 text-slate-600'}`}>
+                {name}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
+      {/* ── Day grid ── */}
+      {pickMode === null && (
+        <>
+          {/* Day-of-week headers */}
+          <div className="grid grid-cols-7 px-2 pt-2">
+            {DAYS_SHORT.map(d => (
+              <div key={d} className="text-center text-xs font-medium text-slate-400 py-1">{d}</div>
+            ))}
+          </div>
+
+          {/* Days */}
+          <div className="grid grid-cols-7 gap-y-0.5 px-2 pb-3">
+            {Array.from({ length: startDow }).map((_, i) => <div key={`e${i}`} />)}
+            {Array.from({ length: totalDays }).map((_, i) => {
+              const d = i + 1
+              const disabled = isDisabled(d)
+              const isToday  = d === today.getDate() && viewM === today.getMonth() + 1 && viewY === today.getFullYear()
+              const isSel    = selected && selected.d === d && selected.m === viewM && selected.y === viewY
+              return (
+                <button key={d} type="button"
+                  onClick={() => !disabled && selectDay(d)}
+                  disabled={disabled}
+                  className={`flex items-center justify-center h-9 w-full rounded-xl text-sm font-medium transition
+                    ${disabled
+                      ? 'text-slate-300 cursor-not-allowed'
+                      : isSel
+                        ? 'bg-brand-500 text-white'
+                        : isToday
+                          ? 'bg-brand-50 text-brand-600 font-bold'
+                          : 'hover:bg-slate-100 text-slate-700'}`}>
+                  {d}
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {/* ── Clear button ── */}
+      {value && (
+        <div className="border-t border-slate-100 px-3 py-2">
+          <button type="button" onClick={() => { onChange(''); onClose() }}
+            className="w-full text-xs text-slate-400 hover:text-red-500 transition font-medium py-1">
+            Clear date
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── DateInput ──────────────────────────────────────────────────────────────
+// Fully custom date picker — no native <input type="date">.
+// Works identically on all iOS versions and browsers.
+// minDate: 'yyyy-MM-dd' — dates before this are greyed/disabled in the picker.
+export function DateInput({ value, onChange, minDate, className = '' }) {
+  const [open, setOpen] = useState(false)
+  const anchorRef = useRef(null)
+
+  return (
+    <div className="relative w-full" ref={anchorRef}>
+      <button type="button" onClick={() => setOpen(v => !v)}
+        className={`input w-full flex items-center gap-2 text-left text-sm ${className}`}>
+        <CalendarDays size={15} className="text-slate-400 shrink-0" />
+        <span className={value ? 'text-slate-700 flex-1' : 'text-slate-400 flex-1'}>
+          {value ? displayDate(value) : 'Select date'}
+        </span>
+        {/* Clear × button — only shows when a date is set */}
+        {value && (
+          <span
+            role="button"
+            onClick={e => { e.stopPropagation(); onChange('') }}
+            className="text-slate-300 hover:text-slate-500 transition shrink-0 leading-none">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>
+            </svg>
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <CalendarPopup
+          value={value}
+          onChange={onChange}
+          onClose={() => setOpen(false)}
+          anchorRef={anchorRef}
+          minDate={minDate}
+        />
       )}
     </div>
   )
 }
 
 // ── DateRangePicker ────────────────────────────────────────────────────────
-// Stacks vertically on mobile, side by side on sm+ screens
-// Clears end date automatically if start date is set after it
+// Start date: free pick. End date: days before start date are greyed + disabled.
 export function DateRangePicker({ startDate, endDate, onStartChange, onEndChange, endDateError }) {
   function handleStartChange(val) {
     onStartChange(val)
-    // Clear end date if it would become invalid
+    // Clear end date if it's now before the new start date
     if (endDate && val && val > endDate) onEndChange('')
   }
-
   function handleEndChange(val) {
-    // Validate: don't allow end before start (submit-time validation handles the rest)
-    if (startDate && val && val < startDate) return
     onEndChange(val)
   }
-
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 w-full">
       <div className="w-full">
         <label className="label">Start Date</label>
         <DateInput value={startDate} onChange={handleStartChange} />
       </div>
       <div className="w-full">
         <label className="label">End Date</label>
-        <DateInput value={endDate} onChange={handleEndChange} />
+        {/* Pass startDate as minDate — days before start are greyed in the picker */}
+        <DateInput value={endDate} onChange={handleEndChange} minDate={startDate || undefined} />
         {endDateError && <p className="text-red-500 text-xs mt-1">{endDateError}</p>}
       </div>
     </div>

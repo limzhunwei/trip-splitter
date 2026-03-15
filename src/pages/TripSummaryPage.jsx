@@ -269,23 +269,30 @@ export default function TripSummaryPage() {
                         : item.myShare
                       const secAmt = hasSecondary ? toSecondary(myrAmt, baseCur.code, trip) : null
                       return (
-                        <div key={item.expenseId} className="card p-4 flex items-center gap-3">
-                          <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-slate-800 truncate">{item.title}</p>
-                            <p className="text-slate-400 text-xs flex items-center gap-1 mt-0.5">
-                              <CalendarDays size={11} />
-                              {fmtDate(item.date, 'MMM d, yyyy')}
-                            </p>
-                          </div>
-                          <div className="text-right shrink-0">
-                            {hasSecondary ? (
-                              <>
-                                <p className="font-bold text-brand-600">{secSymbol} {fmtAmt(secAmt)}</p>
-                                <p className="text-slate-400 text-xs">RM {fmtAmt(myrAmt)}</p>
-                              </>
-                            ) : (
-                              <p className="font-bold text-brand-600">{baseCur.symbol} {fmtAmt(item.myShare)}</p>
-                            )}
+                        <div key={item.expenseId} className="card p-4">
+                          <div className="flex items-start gap-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold text-slate-800 truncate">{item.title}</p>
+                              <p className="text-slate-400 text-xs flex items-center gap-1 mt-0.5">
+                                <CalendarDays size={11} />
+                                {fmtDate(item.date, 'MMM d, yyyy')}
+                              </p>
+                              {item.note && (
+                                <p className="text-slate-400 text-xs mt-1.5 whitespace-pre-wrap break-words leading-relaxed">
+                                  {item.note}
+                                </p>
+                              )}
+                            </div>
+                            <div className="text-right shrink-0">
+                              {hasSecondary ? (
+                                <>
+                                  <p className="font-bold text-brand-600">{secSymbol} {fmtAmt(secAmt)}</p>
+                                  <p className="text-slate-400 text-xs">{baseCur.symbol} {fmtAmt(myrAmt)}</p>
+                                </>
+                              ) : (
+                                <p className="font-bold text-brand-600">{baseCur.symbol} {fmtAmt(item.myShare)}</p>
+                              )}
+                            </div>
                           </div>
                         </div>
                       )

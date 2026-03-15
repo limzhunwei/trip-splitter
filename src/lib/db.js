@@ -571,7 +571,7 @@ export async function getMySpending(tripId) {
   // Fetch expense details for each participation
   const expenseIds = parts.map(p => p.expense_id)
   const { data: expenses, error: eErr } = await supabase.from('Expenses')
-    .select('id, title, amount, date, paid_by')
+    .select('id, title, amount, date, paid_by, note, currency')
     .in('id', expenseIds)
     .order('date', { ascending: false })
   if (eErr) throw eErr
@@ -585,6 +585,8 @@ export async function getMySpending(tripId) {
     myShare: shareMap[e.id] || 0,
     date: e.date,
     paidBy: e.paid_by,
+    note: e.note || null,
+    currency: e.currency || null,
   }))
 
   const total = items.reduce((s, i) => s + i.myShare, 0)

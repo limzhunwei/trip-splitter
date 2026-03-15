@@ -381,7 +381,8 @@ export default function HomePage() {
                 const startX = React.useRef(null)
                 const startY = React.useRef(null)
                 const cardRef = React.useRef(null)
-                const ACTION_WIDTH = isOwned ? 130 : 65
+                // Swipe actions: owned gets delete (always), active non-past also gets pin
+                const ACTION_WIDTH = isOwned ? (isPast ? 65 : 130) : 65
 
                 React.useEffect(() => {
                   if (!swiped) return
@@ -455,12 +456,12 @@ export default function HomePage() {
                       onMouseDown={onDragStart} onMouseMove={onDragMove} onMouseUp={onDragEnd} onMouseLeave={onDragEnd}
                       onClick={handlePress}
                       style={{ transform: `translateX(${offsetX}px)`, transition: dragging ? 'none' : 'transform 0.2s ease' }}
-                      className={`card p-4 flex items-center gap-4 cursor-pointer transition-shadow duration-150 select-none bg-white
+                      className={`card p-4 flex items-center gap-4 cursor-pointer transition-shadow duration-150 select-none
                         ${isPast
-                          ? 'opacity-50 hover:opacity-75 bg-slate-50 border-slate-200'
+                          ? 'bg-slate-100 border-slate-200'
                           : isPinned
-                            ? 'border-amber-200 bg-amber-50/30 hover:shadow-md'
-                            : 'hover:border-brand-200 hover:shadow-md'}`}>
+                            ? 'bg-white border-amber-200 bg-amber-50/30 hover:shadow-md'
+                            : 'bg-white hover:border-brand-200 hover:shadow-md'}`}>
                       <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0
                         ${isPast ? 'bg-slate-100' : isPinned ? 'bg-amber-100' : 'bg-brand-50'}`}>
                         <Plane size={22} className={isPast ? 'text-slate-400' : isPinned ? 'text-amber-500' : 'text-brand-500'} />

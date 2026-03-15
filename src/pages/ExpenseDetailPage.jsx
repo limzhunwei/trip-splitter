@@ -124,7 +124,7 @@ export default function ExpenseDetailPage() {
             {expense?.note && (
               <div className="flex items-start gap-2 text-sm text-slate-500">
                 <StickyNote size={15} className="text-slate-300 mt-0.5 shrink-0" />
-                <span>{expense.note}</span>
+                <span className="whitespace-pre-wrap break-words">{expense.note}</span>
               </div>
             )}
           </div>
